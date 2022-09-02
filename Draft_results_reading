@@ -1,0 +1,203 @@
+import os
+import unicodedata
+import netCDF4 as nc
+import numpy as np
+import pandas as pd
+import wget
+import requests
+import xarray as xa
+from datetime import datetime
+import re
+import collections
+
+os. getcwd()
+
+path = r'D:\Benitez\AB_results\27_07_WOF'
+path_out = r'D:\Benitez\AB_results'
+
+#Environmental indicators:
+''' FET_CTU: freshwater ecotoxicity (ILCD) 
+    FEP_kgP: freshwater eutriphication (ILCD)
+    MEP_kgN: marine eutriphication (ILCD)
+    TEP_molN: freshwater and terrestrial acidification (ILCD)
+    MDP_kgFe: metal depletion (ReCipE)
+    PMFP_kgPM10: particulate matter formation (ReCipE)
+    GWP100_kgCO2eq: climate change (ReCipE)
+    POFP_kgNMVOC: photochemical oxidant formation (ReCipE)
+'''    
+unit = {'FEP':'kg P-Eq', 'GWP100': 'kg CO2-Eq', 'PMFP': 'kgPM10', 
+         'METPinf':'kg 1,4-DB','MDP':'kg Fe-Eq'}
+impacts = ['FEP', 'GWP100', 'PMFP','METPinf', 'MDP']
+
+def read_csv_AB_results(path, path_out):
+    '''read csv files from Activity browser and return a dataframe'''
+    
+    files = os.listdir(path)
+  
+    ds = []
+    tmp = []
+    '''reading csv files'''
+    for f in files:
+        if os.path.splitext(f)[1] == ".csv":
+            df = pd.read_csv( path + '\\' + f )
+            df = df.drop(['Unnamed: 0', ], axis=1)
+            '''Withdraw files names: '''
+            df.insert(0, 'Impact', os.path.basename(f).split('-')[-1].split('.')[0])
+            df.insert(1, 'Component', os.path.basename(f).split('_')[0])
+            df.unit = df.unit.fillna(df.iloc[2,6])
+            df = df.loc[df['index'] == 'Total']
+            tmp.append(df)
+            ds = pd.concat(tmp)
+            ds = ds.drop(columns=['reference product', 'name', 'location', 'database','index'])
+            ds = ds.sort_values(by=['Impact','Component'])
+            ds = ds.set_index(['Impact', 'Component'])
+        else: 
+            print ('path does not contain .csv files')   
+    return ds
+
+def read_excel_AB_results (path, path_out):
+    '''read excel files from Activity browser and return a dataframe'''
+    
+    unit = {'FEP':'kg P-Eq', 'GWP100': 'kg CO2-Eq', 'PMFP': 'kgPM10-Eq', 
+         'METPinf':'kg 1,4-DB','MDP':'kg Fe-Eq', 'MEP': 'kg N-Eq', 'POFP': 'kg NMVOC'}
+    files = os.listdir(path)
+  
+    ds = []
+    tmp = []
+    '''reading excel files'''
+    for f in files:
+        if os.path.splitext(f)[1] == ".xlsx":
+            
+            df = pd.read_excel(path + '\\'+ f, index_col=None, header=None)
+            df.rename(columns=df.iloc[1], inplace = True)
+            df = df.drop([0,1,2])
+            df.insert(0, 'Impact', os.path.basename(f).split('_')[-1].split('.')[0])
+            df = df.rename(columns={"scenario":"Component"})
+            df = df.loc[:,~df.columns.duplicated()]
+            for Index, row in df.iterrows():
+                cn = row['Component'].split('|')[0].split(',')[0]
+                ind = row['Impact']
+                df['Component'] = df['Component'].apply(lambda x:x.replace(row['Component'], cn))
+            df.insert(2, 'unit', unit.get(ind))
+        else: print ('Folder does not contain excel files')
+        tmp.append(df)
+        ds = pd.concat(tmp)
+  
+    return ds
+
+
+def select_AB_scenarios(df, path):
+    
+    '''Select scenarios results according to narratives'''
+    
+    df = df.reset_index()
+    df.columns = df.columns.str.replace('(','',regex=True)
+    df.columns = df.columns.str.replace(')','',regex=True)
+    df.columns = df.columns.str.replace(',','',regex=True)
+    df.columns = df.columns.str.replace("'",'',regex=True)
+
+    valid_scenarios = ['Impact','Component', 'unit','original original',
+                        'SC_2021 Opt_2021', 'SC_2021 Mod_2021',
+                        'SC_2021 Pes_2021', '2025_KN65 Opt_2025',
+                        '2025_KN65 Mod_2025', '2025_KN60 Pes_2025',
+                        '2030_KN65 Opt_2030', '2030_KN65 Mod_2030',
+                        '2030_KN60 Pes_2030', '2035_KN65 Opt_2035',
+                        '2035_KN65 Mod_2035', '2035_KN60 Pes_2035',
+                        '2040_KN65 Opt_2040', '2040_KN65 Mod_2040',
+                        '2040_KN60 Pes_2040', '2045_KN65 Opt_2045',
+                        '2045_KN65 Mod_2045', '2045_KN60 Pes_2045',
+                        '2050_KN65 Opt_2050', '2050_KN65 Mod_2050',
+                        '2050_KN60 Pes_2050']
+    
+    valid_scenarios_2 = ['Impact','Component', 'unit','original original',
+                        'Opt_2021 SC_2021', 'Mod_2021 SC_2021',
+                        'Pes_2021 SC_2021', 'Opt_2025 2025_KN65',
+                        'Mod_2025 2025_KN65', 'Pes_2025 2025_KN60',
+                        'Opt_2030 2030_KN65', 'Mod_2030 2030_KN65',
+                        'Pes_2030 2030_KN60', 'Opt_2035 2035_KN65',
+                        'Mod_2035 2035_KN65', 'Pes_2035 2035_KN60',
+                        'Opt_2040 2040_KN65', 'Mod_2040 2040_KN65',
+                        'Pes_2040 2040_KN60', 'Opt_2045 2045_KN65',
+                        'Mod_2045 2045_KN65', 'Pes_2045 2045_KN60',
+                        'Opt_2050 2050_KN65', 'Mod_2050 2050_KN65',
+                        'Pes_2050 2050_KN60']
+    
+    check =  all(item in list(df.columns) for item in valid_scenarios_2)
+    if check is True:
+        df_selected = df[valid_scenarios_2]
+        df_selected = df_selected.sort_values(by=['Impact','Component'])
+        df_selected = df_selected.set_index(['Impact', 'Component'])
+    else: 
+        df_selected = df[valid_scenarios]
+        df_selected = df_selected.sort_values(by=['Impact','Component'])
+        df_selected = df_selected.set_index(['Impact', 'Component'])
+    
+    return df_selected
+
+def check_background(df, path, path_out):
+    '''Check effect of changes in the backgroun data'''
+    
+    df = df.reset_index()
+    df.columns = df.columns.str.replace('(','',regex=True)
+    df.columns = df.columns.str.replace(')','',regex=True)
+    df.columns = df.columns.str.replace(',','',regex=True)
+    df.columns = df.columns.str.replace("'",'',regex=True)
+
+    check_bg = ['Impact', 'Component','unit','original original',
+                'SC_2021 Opt_2021', '2025_KN65 Opt_2025','2025_KN60 Opt_2025',
+                '2030_KN65 Opt_2025', '2030_KN60 Opt_2025',
+                '2035_KN65 Opt_2025', '2035_KN60 Opt_2025',
+                '2040_KN65 Opt_2025', '2040_KN60 Opt_2025',
+                '2045_KN65 Opt_2025', '2045_KN60 Opt_2025',
+                '2050_KN65 Opt_2025', '2050_KN60 Opt_2025']
+     
+    check_bg_2 = ['Impact', 'Component','unit','original original',
+                  'Opt_2021 SC_2021', 'Opt_2025 2025_KN65','Opt_2025 2025_KN60',
+                  'Opt_2025 2030_KN65', 'Opt_2025 2030_KN60',
+                  'Opt_2025 2035_KN65', 'Opt_2025 2035_KN60',
+                  'Opt_2025 2040_KN65', 'Opt_2025 2040_KN60',
+                  'Opt_2025 2045_KN65', 'Opt_2025 2045_KN60',
+                  'Opt_2025 2050_KN65', 'Opt_2025 2050_KN60']
+    
+    check =  all(item in list(df.columns) for item in check_bg_2)
+    if check is True:
+        df_sel = df[check_bg_2]
+        #df_sel.columns = [c.replace('Opt_2025', '15MW') for c in list(df_sel.columns)]
+        df_sel = df_sel.sort_values(by=['Impact','Component'])
+        df_sel = df_sel.set_index(['Impact', 'Component'])
+    else: 
+         df_sel = df[check_bg]
+         #df_sel.columns = [c.replace('Opt_2025', '15MW') for c in list(df_sel.columns)]
+         df_sel = df_sel.sort_values(by=['Impact','Component'])
+         df_sel = df_sel.set_index(['Impact', 'Component'])
+    
+    return df_sel
+      
+def results_to_csv (df, file_name, path, path_out):
+    '''
+    File name format: tech_summary_selected_scenarios.csv
+    WOF: offshore wind 
+    ''' 
+    df.to_csv(path_out + '\\' + file_name+ '.csv')
+    return file_name + ' ' + '.csv' + ' ' + 'saved in ' + path_out
+
+# file_name = 'WOF_summary_selected_scenarios_01.csv'
+
+def selected_scenarios_to_cvs (df, file_name, path, path_out):
+    
+    '''Suggested format File_name = 'WOF_summary_selected_scenarios_01.csv'''
+    
+    #file_name = 'WOF_summary_selected_scenarios_01.csv'
+    df.to_csv(path_out + '\\' + file_name + '.csv')
+    return file_name + ' ' + 'saved in ' +  path_out
+
+def checked_background_scenarios_to_csv (df, file_name, path, path_out):
+    
+    '''File_name = 'WOF_summary_checked_background_00.csv
+    df = check_backfround(path, path_out) '''
+    
+    df = check_background(path, path_out)
+    df.to_csv(path_out + '\\' + file_name)
+    
+    return file_name + ' ' + 'saved in ' +  path_out
+
