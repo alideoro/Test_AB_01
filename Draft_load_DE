@@ -1,10 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Wed Aug 31 16:28:35 2022
-
-@author: Benitez
-"""
-
 import numpy as np
 import matplotlib
 import os
@@ -13,7 +6,7 @@ from datetime import datetime
 
 path = r'D:\Benitez\Calliope_tutorial\Time-series\Demand_time_series\Historic_load_entsoe\Demand_hourly'
 file_name = 'Load_DE_2015.csv'
-
+path_out = r'D:\Benitez\Calliope_tutorial\Time-series\Demand_time_series\Historic_load_entsoe\Demand_hourly'
 
 def read_ENTOSE_csv_load(path, file_name):
     
@@ -48,9 +41,29 @@ def read_ENTOSE_csv_load(path, file_name):
     
     df = df.rename(columns = { 'Actual Total Load [MW] - Germany (DE)' : new_name })
     df = df.resample('60min').mean()
+    
     return df
 
+def order_load(path, file_name):
+    df = read_ENTOSE_csv_load(path, file_name)
+    df = df.sort_values(by='Load_DE_2015_MW', ascending=False)
+    df = df.reset_index()
+    
+    return df
 
+def plot_power_curve(path, file_name):
+    df = order_load(path, file_name)
+    a = pd.DataFrame(data=df['Load_DE_2015_MW']/1000, index=df.index, columns=['load_pro MW'])
+    a = df['Load_DE_2015_MW']/1000
+    plot_a = a.plot()
+  
+    
+    ds = read_ENTOSE_csv_load(path, file_name)
+    plot_b = ds.plot()
+    
+    return plot_a, plot_b
+        
+    
 def day_load(path, file_name):
     
     '''Separate annual hourly data in 365 days of 24 hours
@@ -78,6 +91,19 @@ def day_load(path, file_name):
     
     return ds 
 
+def plot_daily_load(path, file_name):
+    load = read_ENTOSE_csv_load(path, file_name)
+    load_max = (load/1000).resample("D").max().plot(style="-o", figsize=(10, 5))
+    ave = (load/1000).resample("D").mean().plot(style="-o", figsize=(10, 5))
+    load_min = (load/1000).resample("D").min().plot(style="-o", figsize=(10, 5))
+    #plot_days = day_load(path, file_name)
+    #plot_days.columns
+    #plot_days['Day_1.0', ]
+   # b = plot_days['Day_1.0'].plot(figsize=(5, 3))
+    
+    return load_max, ave, load_min 
+
+
 def day_load_poly_fit (path, file_name):
     
     '''Find a poly_fit grade 6 for each day over 8760 hours
@@ -98,3 +124,101 @@ def day_load_poly_fit (path, file_name):
         tmp.append(fit_day)
    
     return tmp
+    
+def hourly_load_projected (path, file_name):
+    
+    '''
+    Find a projected load over 8760 hours base on reference load=file_name.cvs
+    path: location of cvs file
+    File_name: name of csv file
+    Load_change: from reference load, eg:0.5, 1, 2 
+    
+    '''
+   
+    poly_fits = day_load_poly_fit (path, file_name)
+    len(poly_fits)
+    df = read_ENTOSE_csv_load(path, file_name)
+    
+    load_pro = []
+    year= str(df.index[0]).split('-')[0]
+    start_date = year + '-01-01'
+    days = np.arange(0, 365, 1)
+    len(days)
+
+    tmp = []
+    tmp_2 = []
+    ds3 = []
+    
+    for d in days:
+        
+        ds = pd.DataFrame(data=0, index=pd.date_range(start=start_date, 
+                          periods=365, freq='D'), columns=['Days'])
+        
+        for i in ds.index:
+           
+            ds2 = pd.DataFrame(data=d,index=pd.date_range(
+                  start=i,periods=24, freq='H'),columns=['Days'])
+            ds3.append(ds2)
+        
+        tmp.append(ds2)
+        tmp_2 = pd.concat(tmp)
+    
+    tmp_2['Day_pro'] = 0
+    
+    tmp_3 = []
+    for index, row in tmp_2.iterrows(): 
+        print(row['Days'])
+        row['Day_pro']
+        day_projected = np.arange(0, len(tmp_2), 1)
+        tmp_2['Day_pro'] = day_projected
+        pl = np.polyval(poly_fits[row['Days']],row['Day_pro'])
+        tmp_3.append(pl)
+    
+    lp = pd.DataFrame(data=tmp_3, index=tmp_2.index, columns=['load_pro MW'])
+    lp['Laod_pro GW'] = lp['load_pro MW']/1000
+    lp['Laod_pro GW ordered'] = lp['Laod_pro GW'].sort_values(ascending=False).values
+    lp['Load_ref_ordered'+str(year) + '_GW'] = df.sort_values(by='Load_DE_2015_MW', ascending=False).values/1000
+    lp['Load_ref_'+str(year) + '_GW'] = df['Load_DE_2015_MW'].values/1000
+    lp['Hours'] = tmp_2.loc[:, 'Day_pro'].values
+    
+    return lp 
+    
+def plot_power_curve(path, file_name):
+    
+    df = hourly_load_projected (path, file_name)
+    
+    
+    ax = df.plot(x='Hours', y='Laod_pro GW ordered', 
+                 color="b", label="Load projected")
+    
+    #df.plot(x='Hours', y='Laod_pro GW ordered', color="r", label="Load projected", ax=ax) 
+    df.plot(x='Hours', y='Load_ref_ordered2015_GW', color="g", 
+            label="Load refence", ax=ax)
+    ax.set_xlabel("Hours")
+    ax.set_ylabel("GW")
+    plt.show()
+    
+    return plt.show()
+
+day_load = day_load(path, file_name)
+day365 = day_load['Day_365.0']/1000    
+
+lp['Laod_pro GW', 'Hour']['Hours']
+b = lp.reset_index().loc[8736:8759, 'Laod_pro GW'].to_frame()
+   
+b.plot(y='Laod_pro GW', use_index=True)   
+   
+   ax = df.plot(x='Hours', y='Laod_pro GW ordered', 
+                 color="b", label="Load projected")
+    
+    #df.plot(x='Hours', y='Laod_pro GW ordered', color="r", label="Load projected", ax=ax) 
+    df.plot(x='Hours', y='Load_ref_ordered2015_GW', color="g", 
+            label="Load refence", ax=ax)
+    ax.set_xlabel("Hours")
+    ax.set_ylabel("GW")
+    plt.show() 
+   
+    
+   
+    return load_proyected
+            
