@@ -1,0 +1,112 @@
+'''Read excel files from Activity Browser, converts to a dataframe'
+
+
+import os
+import unicodedata
+import netCDF4 as nc
+import numpy as np
+import pandas as pd
+import wget
+import requests
+import xarray as xa
+from datetime import datetime
+import re
+import collections
+import matplotlib
+
+os. getcwd()
+path = r'D:\Benitez\Calliope_tutorial\Model_settings\Env_inputs\LCA_techs\Results\Operation'  
+
+def read_excel_AB_results (path):
+    '''read excel files from Activity browser and return a dataframe'''
+    
+    unit = {'FEP':'kg P-Eq', 'GWP100': 'kg CO2-Eq','ADP':'kg Sb-Eq'}
+    
+    files = os.listdir(path)
+    
+    ds = []
+    tmp = []
+    '''reading excel files'''
+    for f in files:
+        if os.path.splitext(f)[1] == ".xlsx":
+            df = pd.read_excel(path + '\\'+ f, index_col=None, header=None, skiprows=[0,1,2])
+            tmp.append(df)
+    ds = pd.concat(tmp, ignore_index=True)
+    data = ds.iloc[: , 1:]
+    data = ds.squeeze()
+    
+    process = ds.loc[:,0]
+    
+    return [data, process]
+
+def read_colums_AB (path):
+    '''read columns name of AB results'''
+    files = os.listdir(path)
+    
+    ds = []
+    tmp = []
+    '''reading excel files'''
+    for f in files:
+        if os.path.splitext(f)[1] == ".xlsx":
+            df = pd.read_excel(path + '\\'+ f, index_col=None, header=None)
+            tmp.append(df)
+        ds = pd.concat(tmp, ignore_index=True)
+    
+    LCIA = ds.loc[0,1:].dropna() 
+    
+    LCIA = LCIA.tolist()
+    LCIA = list(dict.fromkeys(LCIA))
+    scenarios = ds.loc[1,1:].dropna() 
+    scenarios = scenarios.tolist()
+    
+    
+    tmp=[]
+    for i in range(len(LCIA)):
+        for j in range(len(scenarios)):
+            tmp.append((LCIA[i], scenarios[j]))
+    #sce = ('scenario', 'sce')
+    tmp = list(dict.fromkeys(tmp))
+    a = tuple(tmp)
+    
+    cols = pd.MultiIndex.from_tuples(a)
+
+    return cols
+
+def dataFrame_AB (path): 
+    cols = read_colums_AB(path)
+    df = pd.DataFrame()
+    df[(('process', 'process'))] = read_excel_AB_results(path)[1]
+    data = read_excel_AB_results(path)[0]
+    data = data.iloc[: , 1:]
+    df[cols] = data
+    return df
+
+df = dataFrame_AB (path)
+
+proces_name = []
+cou = []
+for p in df.iloc[:, 0]:
+    p
+    pro = p.split('|')[1].strip('\n').strip(' ')
+    proces_name.append(pro)
+    c = p.split('|')[2].strip('\n').strip(' ')
+    cou.append(c)
+    
+df.insert(1, 'processes', proces_name)
+df.insert(2, 'country', cou) 
+
+tmp1 = []
+tmp2 = []
+#create a dic
+for i in range(len(df.processes)):
+    i
+    if 'electricity' in df.processes[i].split(',')[0]: 
+        old_name = df.processes[i]
+        new_name = 'PP'
+        tmp1.append(old_name)
+        tmp2.append(new_name)
+    dic = {tmp1: tmp2}
+    else: dic = {df.processes[i]: 'CHP' + df.processes[i].split(',')[1]}
+    dic
+    names_tech = {}
+    
