@@ -1,0 +1,1151 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Fri Mar 24 09:35:31 2023
+
+@author: Benitez
+
+This script creates ymal files, added flexibility to choose the demand year
+"""
+
+from calibration import techs_to_fuelgroup_entsoe
+import yaml
+from yaml import CLoader as Loader
+import os
+import calliope as ca
+import pandas as pd
+
+os.getcwd()
+
+def write_techs():
+    """
+    Writes techs.yaml
+    """
+    cc = ['AT', 'BE', 'BG', 'CH', 'CZ',
+          'DE', 'DKE', 'DKW', 
+          'EE', 'ES', 'FI', 'FR', 'GB', 'GR', 'HR', 'HU',
+          'IE', 'IT', 'LT', 'LU', 'LV', 'NL', 'NO', 'PL', 'PT', 'RO', 'SE',
+          'SI', 'SK']
+    techs = ['ConELC-CHP_COA100MW','ConELC-CHP_COA500MW', 'ConELC-CHP_GEO', 'ConELC-CHP_LIG',
+             'ConELC-CHP_NG-CCGT', 'ConELC-CHP_NG-OCGT', 'ConELC-CHP_NG-ST',
+             'ConELC-CHP_OIL', 'ConELC-CHP_OTH', 'ConELC-CHP_WST','ConELC-CHP_BIO-biomass', 'ConELC-CHP_BIO-biogas',
+             'ConELC-PP_BIO', 'ConELC-PP_COA100MW','ConELC-PP_COA500MW', 'ConELC-PP_GEO',
+             'ConELC-PP_HYD-PST', 'ConELC-PP_HYD-ROR', 'ConELC-PP_HYD-STO',
+             'ConELC-PP_LIG', 'ConELC-PP_NG-CCGT', 'ConELC-PP_NG-OCGT',
+             'ConELC-PP_NG-ST', 'ConELC-PP_NUC', 'ConELC-PP_OIL',
+             'ConELC-PP_OTH', 'ConELC-PP_SPVopenground', 'ConELC-PP_SPVrooftop','ConELC-PP_WOF7MW','ConELC-PP_WOF9MW', 'ConELC-PP_WOF11MW', 'ConELC-PP_WOF15MW',
+             'ConELC-PP_WON', 'ConELC-PP_WST']
+    tab = '    '
+    n = '\n'
+    s = 'techs:' + n
+
+    for ccs in cc:
+        for t in techs:
+            s += n + tab + t + '_' + ccs
+            s += '.essentials.parent: '
+            s += t
+
+    with open(r"pystel/outputs/techs.yaml", "w") as f:
+        f.write(s)
+
+    print('Wrote data to pystel/outputs/techs.yaml')
+
+
+def write_techs2():
+    """
+    Writes techs.yaml but only with techs with cap > 0
+    """
+    # Read in Technologies
+    df = pd.read_excel('pystel\\inputs\\Aggregated_Capacities_v3.xlsx',
+                       sheet_name=0)
+    df = df.set_index('Process').drop(columns=['Attribute', 'Unit', 'Year'])
+
+    tab = '    '
+    n = '\n'
+    tmp_out = 'techs:' + n
+
+    # Loop over all Countries (i) and all techs (j)
+    for i in df:
+        for j in df.index.values:
+            # print(j)
+            # if 'ConELC-PP_HYD-PST' not in j:  # Just for testing
+            if df[i].loc[j] > 0:
+                tmp_out += n + tab + j + '_' + i + '.essentials.parent: ' + j
+
+    with open(r"pystel/outputs/techs.yaml", "w") as f:
+        f.write(tmp_out)
+
+    return(print('Wrote data to pystel/outputs/techs.yaml'))
+
+def write_locations(year):
+    """
+    This function creates a locations.yaml file with
+    - capacities of all knwon locations
+    - geocoordinates
+    - set individual timeseries column for renewables
+    - differs bewteen DKE/DKW
+    """
+
+    # Our data basis for existing capacities
+    # Also see: https://github.com/FRESNA/powerplantmatching
+    # Many thanks to Fabian Gotzens!
+    df = pd.read_excel(r'pystel/inputs/Aggregated_Capacities_v3.xlsx')
+
+    # Read in Storage Size of PUMPED HYDRO (only!)
+    pst = pd.read_excel(r'pystel/inputs/HYD-PST_StorageSize.xlsx')
+
+    # Define Country Codes as list
+    cc = ['AT', 'BE', 'BG', 'CH', 'CZ',
+          'DE_tennet','DE_amprion','DE_50hz','DE_transnet', 'DKE', 'DKW', 
+          'EE', 'ES', 'FI', 'FR', 'GB', 'GR', 'HR', 'HU',
+          'IE', 'IT', 'LT', 'LU', 'LV', 'NL', 'NO', 'PL', 'PT', 'RO', 'SE',
+          'SI', 'SK']
+
+    umcc = ['AL', 'BA', 'BY', 'CY', 'MA', 'ME', 'MK', 'NI', 'RS', 'RU', 'UA']
+
+    # \t cannot be parsed by .yaml --> a tab is defined as four spaces
+    tab = '    '
+
+    # Choose which constraint should be set from the known capacities?
+    # Options: energy_cap_min, energy_cap_equals and energy_cap_max
+    constraint = 'energy_cap_equals'
+
+    # Option for Pumped Hydro storage:
+    # storage_cap_min, storage_cap_equals and storage_cap_max
+    sconstraint = 'storage_cap_equals'
+
+    # All other constraints are declared here, values must be set manually
+    constraint2 = '#energy_cap_min_use'
+    value_c2 = ''
+
+    constraint3 = '#energy_ramping'
+    value_c3 = ''
+
+    constraint4 = '#energy_eff'
+
+    # Create the dataframe for geocoordinates (gc) #
+    gc = pd.read_csv(r'pystel/inputs/Coordinates_EPSG4326.csv',
+                     index_col='ISO3166v2')
+
+    # Start setting up the desired string (called cap)
+    cap = 'locations:\n'
+
+    # Start first iteration over all country codes known
+    for ccs in cc:
+        cap += tab+ccs+':\n'
+
+        # Insert Geo Coordinates from gc dataframe
+        cap += str(2*tab +
+                   'coordinates: {lat: ' +
+                   str(round(gc.loc[ccs, 'Y'], 10)) +
+                   ', lon: ' +
+                   str(round(gc.loc[ccs, 'X'], 10))+'}\n')
+
+        # Write techs in each location
+        cap += 2*tab+'techs:\n'
+
+        # Insert demand and supply technologies
+        cap += ('\n' + 3*tab + 'electricity_demand:\n' + 4*tab
+                + 'constraints:\n' + 5*tab + 'resource: file=demand_power_' + 
+                str(year) +'.csv:'
+                + ccs + '\n' + 4*tab + 'essentials:\n' + 5*tab
+                + 'name: \'Electricity demand in ' + ccs + '\'' + '\n\n')
+        cap += ('\n' + 3*tab + 'supply_COA:\n' + 3*tab + 'supply_LIG:\n'
+                + 3*tab + 'supply_NG:\n' + 3*tab + 'supply_OIL:\n' + 3*tab
+                + 'supply_URA:\n' + 3*tab + 'supply_BIO:\n\n')
+
+        # Start second iteration over all processes known
+        for idx, items in enumerate(df.Process):
+            if True:
+                if df.loc[idx, ccs]*10**6 > 0:  # and 'ConELC-PP_HYD-PST' not in items:
+                    cap += ('\n' + 3*tab + items + '_' + ccs + ':\n' + 4*tab
+                            + 'constraints:\n' + 5*tab + constraint + ': '
+                            + str(round(df.loc[idx, ccs]*10**6, 7)))
+
+                    # For calibration we need the option to add
+                    # any other constraint which can help
+                    cap += '\n' + 5*tab + constraint2 + ': ' + value_c2
+                    cap += '\n' + 5*tab + constraint3 + ': ' + value_c3
+                    cap += '\n' + 5*tab + constraint4 + ': '
+
+                    # Following section adds the storage size of
+                    # the pumped hydro storage for each location
+                    if items == 'ConELC-PP_HYD-PST':
+                        cap += '\n' + 5*tab + sconstraint + ': '
+                        cap += str(pst.loc[0, ccs]*10**6)
+
+                    # For Solar PV, Wind Onshore and Wind Offshore
+                    # it is important to link the capacity factors for each
+                    # individual location. This is only done if capacity for
+                    # the location exists.
+
+                    # Note: cf(DKW) = cf(DKE) for all three techs.
+
+                    # Solar PV
+                    if items == 'ConELC-PP_SPV':
+                        if df.loc[idx, ccs]*10**6 > 0:
+                            if ccs == 'DKW':
+                                cap += ('\n' + 5*tab
+                                        + 'resource: file=tsam_input.csv:spv|DKE')
+                            else:
+                                cap += ('\n' + 5*tab
+                                        + 'resource: file=tsam_input.csv:spv|'
+                                        + ccs)
+
+                    # Wind Onshore
+                    if items == 'ConELC-PP_WON':
+                        if df.loc[idx, ccs]*10**6 > 0:
+                            if ccs == 'DKW':
+                                cap += ('\n' + 5*tab
+                                        + 'resource: file=tsam_input.csv:won|DKE')
+                            else:
+                                cap += ('\n' + 5*tab
+                                        + 'resource: file=tsam_input.csv:won|'
+                                        + ccs)
+
+                    # Wind Offshore
+                    if items == 'ConELC-PP_WOF':
+                        if df.loc[idx, ccs]*10**6 > 0:
+                            if ccs == 'DKW':
+                                cap += ('\n' + 5*tab
+                                        + 'resource: file=tsam_input.csv:wof|DKE')
+                            else:
+                                cap += ('\n' + 5*tab
+                                        + 'resource: file=tsam_input.csv:wof|'
+                                        + ccs)
+
+                    if items == 'ConELC-PP_WOF':
+                        if df.loc[idx, ccs] == 0:
+                            cap += '\n' + 5*tab + 'resource: 0'
+                            cap += '\n' + 5*tab + 'force_resource: false'
+
+                    cap += '\n\n'
+
+        cap += '\n\n\n\n'
+
+    for umccs in umcc:
+        cap += tab + umccs + ':\n'
+        cap += str(2*tab + 'coordinates: {lat: '
+                   + str(round(gc.loc[umccs, 'Y'], 6)) + ', lon: '
+                   + str(round(gc.loc[umccs, 'X'], 6)) + '}\n')
+        cap += 2*tab+'techs:\n'
+        cap += 3*tab+'supply_ELC:\n'
+        cap += '\n\n'
+
+    # Write complete string to a file called locations.yaml
+    f = open(r"pystel/outputs/locations.yaml", "w")
+    f.write(cap)
+    f.close()
+    s = 'Wrote capacities for all locations to /output/locations.yaml'
+    return (print(s))
+
+def write_locations_capinf(year):
+    """
+    This function creates a locations.yaml file with
+    - capacities of all knwon locations
+    - geocoordinates
+    - set individual timeseries column for renewables
+    - differs bewteen DKE/DKW
+    """
+    year = year
+
+    # Our data basis for existing capacities
+    # Also see: https://github.com/FRESNA/powerplantmatching
+    # Many thanks to Fabian Gotzens!
+    df = pd.read_excel(r'pystel/inputs/Aggregated_Capacities_v3.xlsx')
+
+    # Read in Storage Size of PUMPED HYDRO (only!)
+    pst = pd.read_excel(r'pystel/inputs/HYD-PST_StorageSize.xlsx')
+
+    # Define Country Codes as list
+    cc = ['AT', 'BE', 'BG', 'CH', 'CZ',
+          'DE_tennet','DE_amprion','DE_50hz','DE_transnet', 'DKE', 'DKW', 'EE', 'ES', 'FI', 'FR', 'GB', 'GR', 'HR', 'HU',
+          'IE', 'IT', 'LT', 'LU', 'LV', 'NL', 'NO', 'PL', 'PT', 'RO', 'SE',
+          'SI', 'SK']
+
+    umcc = ['AL', 'BA', 'BY', 'CY', 'MA', 'ME', 'MK', 'NI', 'RS', 'RU', 'UA']
+
+    # \t cannot be parsed by .yaml --> a tab is defined as four spaces
+    tab = '    '
+
+    # Choose which constraint should be set from the known capacities?
+    # Options: energy_cap_min, energy_cap_equals and energy_cap_max
+    constraint = 'energy_cap_max'
+
+    # Option for Pumped Hydro storage:
+    # storage_cap_min, storage_cap_equals and storage_cap_max
+    sconstraint = 'storage_cap_equals'
+
+    # All other constraints are declared here, values must be set manually
+    constraint2 = '#energy_cap_min_use'
+    value_c2 = ''
+
+    constraint3 = '#energy_ramping'
+    value_c3 = ''
+
+    constraint4 = '#energy_eff'
+
+    # Create the dataframe for geocoordinates (gc) #
+    gc = pd.read_csv(r'pystel/inputs/Coordinates_EPSG4326.csv',
+                     index_col='ISO3166v2')
+
+    # Start setting up the desired string (called cap)
+    cap = 'locations:\n'
+
+    # Start first iteration over all country codes known
+    for ccs in cc:
+        cap += tab+ccs+':\n'
+
+        # Insert Geo Coordinates from gc dataframe
+        cap += str(2*tab +
+                   'coordinates: {lat: ' +
+                   str(round(gc.loc[ccs, 'Y'], 10)) +
+                   ', lon: ' +
+                   str(round(gc.loc[ccs, 'X'], 10))+'}\n')
+
+        # Write techs in each location
+        cap += 2*tab+'techs:\n'
+
+        # Insert demand and supply technologies
+        cap += ('\n' + 3*tab + 'electricity_demand:\n' + 4*tab
+                + 'constraints:\n' + 5*tab + 'resource: file=demand_power_' + 
+                str(year) +'.csv:'
+                + ccs + '\n' + 4*tab + 'essentials:\n' + 5*tab
+                + 'name: \'Electricity demand in ' + ccs + '\'' + '\n\n')
+        cap += ('\n' + 3*tab + 'supply_COA:\n' + 3*tab + 'supply_LIG:\n'
+                + 3*tab + 'supply_NG:\n' + 3*tab + 'supply_OIL:\n' + 3*tab
+                + 'supply_URA:\n' + 3*tab + 'supply_BIO:\n\n')
+
+        # Start second iteration over all processes known
+        for idx, items in enumerate(df.Process):
+            if True:
+                if df.loc[idx, ccs]*10**6 > 0:  # and 'ConELC-PP_HYD-PST' not in items:
+                    cap += ('\n' + 3*tab + items + '_' + ccs + ':\n' + 4*tab
+                            + 'constraints:\n' + 5*tab + constraint + ': '
+                            + 'inf')
+
+                    # For calibration we need the option to add
+                    # any other constraint which can help
+                    cap += '\n' + 5*tab + constraint2 + ': ' + value_c2
+                    cap += '\n' + 5*tab + constraint3 + ': ' + value_c3
+                    cap += '\n' + 5*tab + constraint4 + ': '
+
+                    # Following section adds the storage size of
+                    # the pumped hydro storage for each location
+                    if items == 'ConELC-PP_HYD-PST':
+                        cap += '\n' + 5*tab + sconstraint + ': '
+                        cap += str(pst.loc[0, ccs]*10**6)
+
+                    # For Solar PV, Wind Onshore and Wind Offshore
+                    # it is important to link the capacity factors for each
+                    # individual location. This is only done if capacity for
+                    # the location exists.
+
+                    # Note: cf(DKW) = cf(DKE) for all three techs.
+
+                    # Solar PV
+                    if items == 'ConELC-PP_SPV':
+                        if df.loc[idx, ccs]*10**6 > 0:
+                            if ccs == 'DKW':
+                                cap += ('\n' + 5*tab
+                                        + 'resource: file=tsam_input.csv:spv|DKE')
+                            else:
+                                cap += ('\n' + 5*tab
+                                        + 'resource: file=tsam_input.csv:spv|'
+                                        + ccs)
+
+                    # Wind Onshore
+                    if items == 'ConELC-PP_WON':
+                        if df.loc[idx, ccs]*10**6 > 0:
+                            if ccs == 'DKW':
+                                cap += ('\n' + 5*tab
+                                        + 'resource: file=tsam_input.csv:won|DKE')
+                            else:
+                                cap += ('\n' + 5*tab
+                                        + 'resource: file=tsam_input.csv:won|'
+                                        + ccs)
+
+                    # Wind Offshore
+                    if items == 'ConELC-PP_WOF':
+                        if df.loc[idx, ccs]*10**6 > 0:
+                            if ccs == 'DKW':
+                                cap += ('\n' + 5*tab
+                                        + 'resource: file=tsam_input.csv:wof|DKE')
+                            else:
+                                cap += ('\n' + 5*tab
+                                        + 'resource: file=tsam_input.csv:wof|'
+                                        + ccs)
+
+                    if items == 'ConELC-PP_WOF':
+                        if df.loc[idx, ccs] == 0:
+                            cap += '\n' + 5*tab + 'resource: 0'
+                            cap += '\n' + 5*tab + 'force_resource: false'
+
+                    cap += '\n\n'
+
+        cap += '\n\n\n\n'
+
+    for umccs in umcc:
+        cap += tab + umccs + ':\n'
+        cap += str(2*tab + 'coordinates: {lat: '
+                   + str(round(gc.loc[umccs, 'Y'], 6)) + ', lon: '
+                   + str(round(gc.loc[umccs, 'X'], 6)) + '}\n')
+        cap += 2*tab+'techs:\n'
+        cap += 3*tab+'supply_ELC:\n'
+        cap += '\n\n'
+
+    # Write complete string to a file called locations.yaml
+    f = open(r"pystel/outputs/locations_inf.yaml", "w")
+    f.write(cap)
+    f.close()
+    s = 'Wrote capacities for all locations to /output/locations_inf.yaml'
+    return (print(s))
+
+def write_groupconstraint():
+    
+    """
+    Function to write the groupconstraint.yaml file for calibration
+    It replace groupshare.yaml of previos Calliope version.
+    
+    """
+    
+    #df = pd.read_excel("pystel\\inputs\\Erzeugung_Factsheetv4.xlsx",
+                       #sheet_name=1)
+    
+    fg = techs_to_fuelgroup_entsoe()
+    # For now we don' need CAES
+    fg.pop('ConELC-PP_CAES')
+    fg.pop('ConELC-PP_CSP')
+
+    # Get Techs by Carrier
+    biomass = []
+    for i in fg.keys():
+        if fg.get(i) == 'Biomass':
+            biomass.append(i)
+
+    gas = []
+    for i in fg.keys():
+        if fg.get(i) == 'Gas':
+            gas.append(i)
+
+    hardcoal = []
+    for i in fg.keys():
+        if fg.get(i) == 'Hard Coal':
+            hardcoal.append(i)
+
+    hydro = []
+    for i in fg.keys():
+        if fg.get(i) == 'Hydro':
+            hydro.append(i)
+
+    lignite = []
+    for i in fg.keys():
+        if fg.get(i) == 'Lignite':
+            lignite.append(i)
+
+    nuclear = []
+    for i in fg.keys():
+        if fg.get(i) == 'Nuclear':
+            nuclear.append(i)
+
+    oil = []
+    for i in fg.keys():
+        if fg.get(i) == 'Oil':
+            oil.append(i)
+
+    solar = []
+    for i in fg.keys():
+        if fg.get(i) == 'Solar':
+            solar.append(i)
+
+    wind = []
+    for i in fg.keys():
+        if fg.get(i) == 'Wind':
+            wind.append(i)
+
+    other = []
+    for i in fg.keys():
+        if fg.get(i) == 'Other':
+            other.append(i)
+            
+    # Start string
+    n = '\n'
+    t = '    '
+    s = 'model:' + n + t + 'group_constraints:' + n + 2*t
+    con_1 = '#carrier_prod_max: '
+    con_2 = '#demand_share_equals: '
+    con_3 = 'demand_share_min: '
+    
+    DE_locs = ['DE_50hz', 'DE_amprion', 'DE_tennet', 'DE_transnet']
+    EU_locs = ['AT', 'BE', 'BG', 'CH', 'CZ', 'DKE', 'DKW', 'EE', 'ES', 'FI', 
+               'FR', 'GB', 'GR', 'HR', 'HU', 'IE', 'IT', 'LT', 'LU', 'LV', 
+               'NL', 'NO', 'PL', 'PT', 'RO', 'SE', 'SI', 'SK']
+    
+    #hardcoal
+    s += 'hardcoal' + '_' + 'DE:' + n + 3*t
+    s += 'techs: ' + str(hardcoal) + n + 3*t
+    s += 'locs: ' + str(DE_locs) + n + 3*t
+    s += con_1 + n + 3*t
+    s += con_2 + n + 3*t
+    s += con_3 + n + 4*t
+    s += 'electricity: '
+    s += 2*n + 2*t
+        
+    s += 'hardcoal' + '_' + 'EU:' + n + 3*t
+    s += 'techs: ' + str(hardcoal) + n + 3*t
+    s += 'locs: ' + str(EU_locs) + n + 3*t
+    s += con_1 + n + 3*t
+    s += con_2 + n + 3*t
+    s += con_3 + n + 4*t
+    s += 'electricity: ' 
+    s += 2*n + 2*t
+    
+    #lignite
+    s += 'lignite' + '_' + 'DE:' + n + 3*t
+    s += 'techs: ' + str(lignite) + n + 3*t
+    s += 'locs: ' + str(DE_locs) + n + 3*t
+    s += con_1 + n + 3*t
+    s += con_2 + n + 3*t
+    s += con_3 + n + 4*t
+    s += 'electricity: '
+    s += 2*n + 2*t
+    
+    s += 'lignite' + '_' + 'EU:' + n + 3*t
+    s += 'techs: ' + str(lignite) + n + 3*t
+    s += 'locs: ' + str(EU_locs) + n + 3*t
+    s += con_1 + n + 3*t
+    s += con_2 + n + 3*t
+    s += con_3 + n + 4*t
+    s += 'electricity: ' 
+    s += 2*n + 2*t
+    
+    #gas:systemwide    
+    s += 'systemwide_gas: ' + n + 3*t
+    s += 'techs: ' + str(gas) + n + 3*t
+    s += con_1 + n + 3*t
+    s += con_2 + n + 3*t
+    s += con_3 + n + 4*t
+    s += 'electricity: ' 
+    s += 2*n + 2*t   
+    
+    #s += 'systemwidegas' + '_' + 'EU:' + n + 3*t
+    #s += 'techs: ' + str(gas) + n + 3*t
+    #s += 'locs: ' + str(EU_locs) + n + 3*t
+    #s += con_1 + n + 3*t
+    #s += con_2 + n + 3*t
+    #s += con_3 + n + 4*t
+    #s += 'electricity: ' 
+    #s += 2*n + 2*t  
+   
+    #oil:
+    s += 'oil' + '_' + 'DE:' + n + 3*t
+    s += 'techs: ' + str(oil) + n + 3*t
+    s += 'locs: ' + str(DE_locs) + n + 3*t
+    s += con_1 + n + 3*t
+    s += con_2 + n + 3*t
+    s += con_3 + n + 4*t
+    s += 'electricity: '
+    s += 2*n + 2*t
+    
+    s += 'oil' + '_' + 'EU:' + n + 3*t
+    s += 'techs: ' + str(oil) + n + 3*t
+    s += 'locs: ' + str(EU_locs) + n + 3*t
+    s += con_1 + n + 3*t
+    s += con_2 + n + 3*t
+    s += con_3 + n + 4*t
+    s += 'electricity: ' 
+    s += 2*n + 2*t
+    
+    #nuclear:
+    s += 'nuclear' + '_' + 'DE:' + n + 3*t
+    s += 'techs: ' + str(nuclear) + n + 3*t
+    s += 'locs: ' + str(DE_locs) + n + 3*t
+    s += con_1 + n + 3*t
+    s += con_2 + n + 3*t
+    s += con_3 + n + 4*t
+    s += 'electricity: '
+    #s += str(float(df[(df['Country Code'] == cc)].Nuclear.values))
+    s += 2*n + 2*t
+    
+    s += 'nuclear' + '_' + 'EU:' + n + 3*t
+    s += 'techs: ' + str(nuclear) + n + 3*t
+    s += 'locs: ' + str(EU_locs) + n + 3*t
+    s += con_1 + n + 3*t
+    s += con_2 + n + 3*t
+    s += con_3 + n + 4*t
+    s += 'electricity: ' 
+    s += 2*n + 2*t
+        
+    #biomass:
+    s += 'biomass' + '_' + 'DE:' + n + 3*t
+    s += 'techs: ' + str(biomass) + n + 3*t
+    s += 'locs: ' + str(DE_locs) + n + 3*t
+    s += con_1 + n + 3*t
+    s += con_2 + n + 3*t
+    s += con_3 + n + 4*t
+    s += 'electricity: '
+    #s += str(float(df[(df['Country Code'] == cc)].Biomass.values))
+    s += 2*n + 2*t
+    
+    s += 'biomass' + '_' + 'EU:' + n + 3*t
+    s += 'techs: ' + str(biomass) + n + 3*t
+    s += 'locs: ' + str(EU_locs) + n + 3*t
+    s += con_1 + n + 3*t
+    s += con_2 + n + 3*t
+    s += con_3 + n + 4*t
+    s += 'electricity: ' 
+    #s += str(float(df[(df['Country Code'] == cc)].Biomass.values))
+    s += 2*n + 2*t
+    
+    #hydro:
+    s += 'hydro' + '_' + 'DE:' + n + 3*t
+    s += 'techs: ' + str(hydro) + n + 3*t
+    s += 'locs: ' + str(DE_locs) + n + 3*t
+    s += con_1 + n + 3*t
+    s += con_2 + n + 3*t
+    s += con_3 + n + 4*t
+    s += 'electricity: '
+    s += 2*n + 2*t
+    
+    s += 'hydro' + '_' + 'EU:' + n + 3*t
+    s += 'techs: ' + str(hydro) + n + 3*t
+    s += 'locs: ' + str(EU_locs) + n + 3*t
+    s += con_1 + n + 3*t
+    s += con_2 + n + 3*t
+    s += con_3 + n + 4*t
+    s += 'electricity: ' 
+    s += 2*n + 2*t
+        
+    #renewables: wind onshore, wind offshore, solar
+    ren = wind
+    ren.append(solar[0])
+    s += 'renewables' + '_' + 'DE:' + n + 3*t
+    s += 'techs: ' + str(ren) + n + 3*t
+    s += 'locs: ' + str(DE_locs) + n + 3*t
+    s += con_1 + n + 3*t
+    s += con_2 + n + 3*t
+    s += con_3 + n + 4*t
+    s += 'electricity: '
+    s += 2*n + 2*t
+    
+    s += 'renewables' + '_' + 'EU:' + n + 3*t
+    s += 'techs: ' + str(ren) + n + 3*t
+    s += 'locs: ' + str(EU_locs) + n + 3*t
+    s += con_1 + n + 3*t
+    s += con_2 + n + 3*t
+    s += con_3 + n + 4*t
+    s += 'electricity: ' 
+    s += 2*n + 2*t
+   
+    #others:
+    s += 'other' + '_' + 'DE:' + n + 3*t
+    s += 'techs: ' + str(other) + n + 3*t
+    s += 'locs: ' + str(DE_locs) + n + 3*t
+    s += con_1 + n + 3*t
+    s += con_2 + n + 3*t
+    s += con_3 + n + 4*t
+    s += 'electricity: '
+    s += 2*n + 2*t
+   
+    s += 'other' + '_' + 'EU:' + n + 3*t
+    s += 'techs: ' + str(other) + n + 3*t
+    s += 'locs: ' + str(EU_locs) + n + 3*t
+    s += con_1 + n + 3*t
+    s += con_2 + n + 3*t
+    s += con_3 + n + 4*t
+    s += 'electricity: ' 
+    s += 1*n + 1*t
+    s += '#end' 
+
+    with open('pystel\\outputs\\groupconstraint.yaml', 'w') as f:
+        f.write(s)
+
+    print('Wrote data to pystel\\outputs\\groupconstraint.yaml')
+    
+def write_tech_groups(year, sce):
+    """
+    This function creates a techgroups.yaml file with
+    - technology of all knwon locations
+    - constrains: energy efficiency, lifetime, MW
+    - monetary data: interest rate, CAPEX and OPEX
+    -sce = ['Kop-1.5 grad', 'Pro-CN65', 'Pro-CN60', 'Kop-basis']
+    -year = [2022, 2030, 2040,2050]
+    """
+    fg = techs_to_fuelgroup_entsoe()
+    # For now we don' need CAES
+    fg.pop('ConELC-PP_CAES')
+    fg.pop('ConELC-PP_CSP')
+    
+    year = year
+    sce = sce
+    
+    # Get Techs by Carrier
+    biomass = []
+    for i in fg.keys():
+        if fg.get(i) == 'Biomass':
+            biomass.append(i)
+
+    gas = []
+    for i in fg.keys():
+        if fg.get(i) == 'Gas':
+            gas.append(i)
+
+    hardcoal = []
+    for i in fg.keys():
+        if fg.get(i) == 'Hard Coal':
+            hardcoal.append(i)
+
+    hydro = []
+    for i in fg.keys():
+        if fg.get(i) == 'Hydro':
+            hydro.append(i)
+
+    lignite = []
+    for i in fg.keys():
+        if fg.get(i) == 'Lignite':
+            lignite.append(i)
+
+    nuclear = []
+    for i in fg.keys():
+        if fg.get(i) == 'Nuclear':
+            nuclear.append(i)
+
+    oil = []
+    for i in fg.keys():
+        if fg.get(i) == 'Oil':
+            oil.append(i)
+
+    solar = []
+    for i in fg.keys():
+        if fg.get(i) == 'Solar':
+            solar.append(i)
+
+    wind = []
+    for i in fg.keys():
+        if fg.get(i) == 'Wind':
+            wind.append(i)
+
+    other = []
+    for i in fg.keys():
+        if fg.get(i) == 'Other':
+            other.append(i)
+    
+    # Start string
+    n = '\n'
+    t = '    '
+    s = 'tech_groups:' + n + t + '### Conversion (plus) ###' + n + 1*t 
+
+    #essentials:
+    ess1 = 'name: '
+    ess2 = 'color: '
+    ess3 = 'parent: '
+    ess4 = 'carrier_out: '
+    ess5 = 'carrier_in: '
+    ess6 = 'carrier: '
+    
+    #constraints:
+    con1 = 'energy_eff: '
+    con2 = 'energy_cap_max: '   #kW
+    con3 = 'lifetime: '         #years 
+    #cost contraints:
+    con4 = 'interest_rate: '
+    con5 = 'enegy_cap: '        #as cost: €/kW = Mio€ / GW
+    con6 = 'om_annual: '        #fix o&m €/kW = Mio€ / GW
+    #storage contraints:
+    con7 = 'storage_cap_max: '
+    con8 = 'storage_loss'
+    
+    #renewables constraints:
+    con9 = 'resource: '
+    con10 = 'resource_area_max: '
+    con11 = 'force_resource: '
+    con12 = 'resource_area_per_energy_cap: '
+    
+    #hardcoal
+    s += '# COA fired power plant #' + n +1*t
+    s += str(hardcoal[0]) + ':' + n + 2*t
+    s += 'essentials:' + n + 3*t
+    s += ess1 + n + 3*t
+    s += ess2 + n + 3*t
+    s += ess3 + n + 3*t
+    s += ess4 + n + 3*t
+    s += ess5 + n + 2*t
+    #constraints:
+    s += 'constraints:' + n + 3*t
+    s += con1 + n + 3*t
+    s += con2 + n + 3*t
+    s += con3 + n + 2*t
+    #cost
+    s += 'costs:' + n + 3*t
+    s += 'monetary:' + n + 4*t
+    s += con4 + n + 4*t
+    s += con5 + n + 4*t
+    s += con6 + 2*n + 1*t
+    
+    s += '# LIG fired power plant #' + n +1*t
+    s += str(lignite[0]) + ':' + n + 2*t
+    s += 'essentials:' + n + 3*t
+    s += ess1 + n + 3*t
+    s += ess2 + n + 3*t
+    s += ess3 + n + 3*t
+    s += ess4 + n + 3*t
+    s += ess5 + n + 2*t
+    #constraints:
+    s += 'constraints:' + n + 3*t
+    s += con1 + n + 3*t
+    s += con2 + n + 3*t
+    s += con3 + n + 2*t
+    #cost
+    s += 'costs' + n + 3*t
+    s += 'monetary' + n + 4*t
+    s += con4 + n + 4*t
+    s += con5 + n + 4*t
+    s += con6 + 2*n + 1*t
+
+    s += '# Open Cycle Gas Turbine Power Plant #' + n +1*t
+    s += str(gas[0]) + ':' + n + 2*t
+    s += 'essentials:' + n + 3*t
+    s += ess1 + n + 3*t
+    s += ess2 + n + 3*t
+    s += ess3 + n + 3*t
+    s += ess4 + n + 3*t
+    s += ess5 + n + 2*t
+    #constraints:
+    s += 'constraints: ' + n + 3*t
+    s += con1 + n + 3*t
+    s += con2 + n + 3*t
+    s += con3 + n + 2*t
+    #cost
+    s += 'costs' + n + 3*t
+    s += 'monetary' + n + 4*t
+    s += con4 + n + 4*t
+    s += con5 + n + 4*t
+    s += con6 + 2*n + 1*t           
+    
+    s += '# Natural Gas Steam Turbine Power Plant #' + n +1*t
+    s += str(gas[1]) + ':' + n + 2*t
+    s += 'essentials:' + n + 3*t
+    s += ess1 + n + 3*t
+    s += ess2 + n + 3*t
+    s += ess3 + n + 3*t
+    s += ess4 + n + 3*t
+    s += ess5 + n + 2*t
+    #constraints:
+    s += 'constraints: ' + n + 3*t
+    s += con1 + n + 3*t
+    s += con2 + n + 3*t
+    s += con3 + n + 2*t
+    #cost
+    s += 'costs' + n + 3*t
+    s += 'monetary' + n + 4*t
+    s += con4 + n + 4*t
+    s += con5 + n + 4*t
+    s += con6 + 2*n + 1*t  
+    
+    s += '# Combined Cycle Gas Turbines #' + n +1*t
+    s += str(gas[2]) + ':' + n + 2*t
+    s += 'essentials:' + n + 3*t
+    s += ess1 + n + 3*t
+    s += ess2 + n + 3*t
+    s += ess3 + n + 3*t
+    s += ess4 + n + 3*t
+    s += ess5 + n + 2*t
+    #constraints:
+    s += 'constraints: ' + n + 3*t
+    s += con1 + n + 3*t
+    s += con2 + n + 3*t
+    s += con3 + n + 2*t
+    #cost
+    s += 'costs:' + n + 3*t
+    s += 'monetary:' + n + 4*t
+    s += con4 + n + 4*t
+    s += con5 + n + 4*t
+    s += con6 + 2*n + 1*t 
+    
+    s += '# Oil fired Power Plant #' + n +1*t
+    s += str(oil[0]) + ':' + n + 2*t
+    s += 'essentials:' + n + 3*t
+    s += ess1 + n + 3*t
+    s += ess2 + n + 3*t
+    s += ess3 + n + 3*t
+    s += ess4 + n + 3*t
+    s += ess5 + n + 2*t
+    #constraints:
+    s += 'constraints: ' + n + 3*t
+    s += con1 + n + 3*t
+    s += con2 + n + 3*t
+    s += con3 + n + 2*t
+    #cost
+    s += 'costs:' + n + 3*t
+    s += 'monetary:' + n + 4*t
+    s += con4 + n + 4*t
+    s += con5 + n + 4*t
+    s += con6 + 2*n + 1*t 
+    
+    s += '# Nuclear power plant #' + n +1*t
+    s += str(nuclear[0]) + ':' + n + 2*t
+    s += 'essentials:' + n + 3*t
+    s += ess1 + n + 3*t
+    s += ess2 + n + 3*t
+    s += ess3 + n + 3*t
+    s += ess4 + n + 3*t
+    s += ess5 + n + 2*t
+    #constraints:
+    s += 'constraints: ' + n + 3*t
+    s += con1 + n + 3*t
+    s += con2 + n + 3*t
+    s += con3 + n + 2*t
+    #cost
+    s += 'costs:' + n + 3*t
+    s += 'monetary:' + n + 4*t
+    s += con4 + n + 4*t
+    s += con5 + n + 4*t
+    s += con6 + 2*n + 1*t 
+    
+    s += '# Biomass Power Plant #' + n +1*t
+    s += str(biomass[0]) + ':' + n + 2*t
+    s += 'essentials:' + n + 3*t
+    s += ess1 + n + 3*t
+    s += ess2 + n + 3*t
+    s += ess3 + n + 3*t
+    s += ess4 + n + 3*t
+    s += ess5 + n + 2*t
+    #constraints:
+    s += 'constraints: ' + n + 3*t
+    s += con1 + n + 3*t
+    s += con2 + n + 3*t
+    s += con3 + n + 2*t
+    #cost
+    s += 'costs:' + n + 3*t
+    s += 'monetary:' + n + 4*t
+    s += con4 + n + 4*t
+    s += con5 + n + 4*t
+    s += con6 + 2*n + 1*t 
+    
+    s += '### Renewables ###' + n + 1*t
+    s += '# Hydro Run of River #' + n +1*t
+    s += str(hydro[0]) + ':' + n + 2*t
+    s += 'essentials:' + n + 3*t
+    s += ess1 + n + 3*t
+    s += ess2 + n + 3*t
+    s += ess3 + n + 3*t
+    s += ess4 + n + 3*t
+    s += ess6 + n + 2*t
+    #constraints:
+    s += 'constraints: ' + n + 3*t
+    s += con1 + n + 3*t
+    s += con2 + n + 3*t
+    s += con3 + n + 2*t
+    #cost
+    s += 'costs:' + n + 3*t
+    s += 'monetary:' + n + 4*t
+    s += con4 + n + 4*t
+    s += con5 + n + 4*t
+    s += con6 + 2*n + 1*t 
+    
+    s += '# Hydro Reservoir Storage #' + n +1*t
+    s += str(hydro[1]) + ':' + n + 2*t
+    s += 'essentials:' + n + 3*t
+    s += ess1 + n + 3*t
+    s += ess2 + n + 3*t
+    s += ess3 + n + 3*t
+    s += ess4 + n + 3*t
+    s += ess6 + n + 2*t
+    #constraints:
+    s += 'constraints: ' + n + 3*t
+    s += con1 + n + 3*t
+    s += con2 + n + 3*t
+    s += con3 + n + 2*t
+    #cost
+    s += 'costs:' + n + 3*t
+    s += 'monetary:' + n + 4*t
+    s += con4 + n + 4*t
+    s += con5 + n + 4*t
+    s += con6 + 2*n + 1*t 
+    
+    s += '# Pumped hydro storage #' + n +1*t
+    s += str(hydro[2]) + ':' + n + 2*t
+    s += 'essentials:' + n + 3*t
+    s += ess1 + n + 3*t
+    s += ess2 + n + 3*t
+    s += ess3 + n + 3*t
+    s += ess6 + n + 2*t
+    #constraints:
+    s += 'constraints: ' + n + 3*t
+    s += con2 + n + 3*t
+    s += con7 + n + 3*t
+    s += con1 + n + 2*t
+    s += con8 + n + 3*t
+    s += con3 + n + 2*t
+    #cost
+    s += 'costs:' + n + 3*t
+    s += 'monetary:' + n + 4*t
+    s += con4 + n + 4*t
+    s += con5 + n + 4*t
+    s += con6 + 2*n + 1*t 
+    
+    s += '# Wind onshore #' + n +1*t
+    s += str(wind[0]) + ':' + n + 2*t
+    s += 'essentials:' + n + 3*t
+    s += ess1 + n + 3*t
+    s += ess2 + n + 3*t
+    s += ess3 + n + 3*t
+    s += ess6 + n + 2*t
+    #constraints:
+    s += 'constraints: ' + n + 3*t
+    s += con9 + n + 3*t
+    s += con2 + n + 3*t
+    s += con10 + n + 3*t
+    s += con11 + n + 3*t
+    s += con12 + n + 3*t
+    s += con3 + n + 2*t
+    #cost
+    s += 'costs:' + n + 3*t
+    s += 'monetary:' + n + 4*t
+    s += con4 + n + 4*t
+    s += con5 + n + 4*t
+    s += con6 + 2*n + 1*t 
+    
+    s += '# Wind offshore #' + n +1*t
+    s += str(wind[1]) + ':' + n + 2*t
+    s += 'essentials:' + n + 3*t
+    s += ess1 + n + 3*t
+    s += ess2 + n + 3*t
+    s += ess3 + n + 3*t
+    s += ess6 + n + 2*t
+    #constraints:
+    s += 'constraints: ' + n + 3*t
+    s += con9 + n + 3*t
+    s += con2 + n + 3*t
+    s += con10 + n + 3*t
+    s += con11 + n + 3*t
+    s += con12 + n + 3*t
+    s += con3 + n + 2*t
+    #cost
+    s += 'costs:' + n + 3*t
+    s += 'monetary:' + n + 4*t
+    s += con4 + n + 4*t
+    s += 'om_annual_investment_fraction: ' 
+    s += str(0.07) + n + 1*t 
+    s += 'techs: '  '#adding technology diversity' + n + 2*t
+    
+    #Reading capex and opex prices per year, scenario, and MW:
+    owt = pd.read_excel(r'D:\Benitez\Calliope_tutorial\Model_settings\Eco_inputs\Input_eco.xlsx', 
+                   sheet_name='Price_development', skiprows=10) 
+    owt = owt.dropna()
+    wt = owt.MW.drop_duplicates()
+    wt = wt.to_list()
+    #capex = owt[owt.MW==wt[0]][owt['Scenario']==sce][year].values[0]
+    #opex = (7/100)*capex   
+    
+    s += str(wind[1]) + '_' + str(wt[0]) + 'MW:' + n + 3*t
+    s += 'essentials: ' + n + 4*t
+    s += ess3 + '\'' + str(wind[1]) +'\'' + n + 4*t
+    s += ess1  + '\''  
+    s += 'offshore ' + str(wt[0]) + ' MW' + '\'' +  n + 3*t
+    s += 'constraints:' + n +4*t
+    s += 'energy_cap_per_unit: ' 
+    s += str(wt[0]*1000) + n + 4*t # kW per unit 
+    s += 'energy_cap_max: '
+    s += 'inf' + n + 3*t
+    s += 'costs:' + n + 4*t
+    s += 'monetary:' + n + 4*t
+    s += 'energy_cap: ' 
+    s += str(owt[owt.MW==wt[0]][owt['Scenario']==sce][year].values[0]) + 2*n + 2*t
+    
+    s += str(wind[1]) + '_' + str(wt[1]) + 'MW:' + n + 3*t
+    s += 'essentials: ' + n + 4*t
+    s += ess3 + str(wind[1]) + n + 4*t
+    s += ess1  + '\''
+    s += 'offshore ' + str(wt[1]) + ' MW' + '\'' + n + 3*t
+    s += 'constraints:' + n + 4*t
+    s += 'energy_cap_per_unit: ' 
+    s += str(wt[1]*1000) + n + 4*t # kW per unit 
+    s += 'energy_cap_max: '
+    s += 'inf' + n + 3*t
+    s += 'costs:' + n + 4*t
+    s += 'monetary:' + n + 4*t
+    s += 'energy_cap: ' 
+    s += str(owt[owt.MW==wt[1]][owt['Scenario']==sce][year].values[0]) + 2*n + 2*t
+    
+    s += str(wind[1]) + '_' + str(wt[2]) + 'MW:' + n + 3*t
+    s += 'essentials: ' + n + 4*t
+    s += ess3 + str(wind[1]) + n + 4*t
+    s += ess1 + '\''
+    s += 'offshore ' + str(wt[2]) + ' MW' + '\'' + n + 3*t
+    s += 'constraints:' + n +4*t
+    s += 'energy_cap_per_unit: ' 
+    s += str(wt[2]*1000) + n + 4*t # kW per unit 
+    s += 'energy_cap_max: '
+    s += 'inf' + n + 3*t
+    s += 'costs:' + n + 4*t
+    s += 'monetary:' + n + 4*t
+    s += 'energy_cap: ' 
+    s += str(owt[owt.MW==wt[2]][owt['Scenario']==sce][year].values[0]) + 2*n + 2*t
+    
+    s += str(wind[1]) + '_' + str(wt[3]) + 'MW:' + n + 3*t
+    s += 'essentials: ' + n + 4*t
+    s += ess3 + str(wind[1]) + n + 4*t
+    s += ess1 + '\''
+    s += 'offshore ' + str(wt[3]) + ' MW' + '\'' + n + 3*t
+    s += 'constraints:' + n +4*t
+    s += 'energy_cap_per_unit: ' 
+    s += str(wt[3]*1000) + n + 4*t # kW per unit 
+    s += 'energy_cap_max: '
+    s += 'inf' + n + 3*t
+    s += 'costs:' + n + 4*t
+    s += 'monetary:' + n + 4*t
+    s += 'energy_cap: ' 
+    s += str(owt[owt.MW==wt[3]][owt['Scenario']==sce][year].values[0]) + 2*n + 2*t
+    
+    s += str(wind[1]) + '_' + str(wt[4]) + 'MW:' + n + 3*t
+    s += 'essentials: ' + n + 4*t
+    s += ess3 + str(wind[1]) + n + 4*t
+    s += ess1 + '\''
+    s += 'offshore ' + str(wt[4]) + ' MW' + '\'' + n + 3*t
+    s += 'constraints:' + n +4*t
+    s += 'energy_cap_per_unit: ' 
+    s += str(wt[4]*1000) + n + 4*t # kW per unit 
+    s += 'energy_cap_max: '
+    s += 'inf' + n + 3*t
+    s += 'costs:' + n + 4*t
+    s += 'monetary:' + n + 4*t
+    s += 'energy_cap: ' 
+    s += str(owt[owt.MW==wt[4]][owt['Scenario']==sce][year].values[0]) + 2*n + 1*t
+    
+    s += '# Solar Photovoltaic #' + 2*n + 1*t
+    s += str(solar[0]) + ':' + n + 2*t
+    s += 'essentials: ' + n + 3*t
+    s += ess1 + '\'' + 'PP - Solar Photovoltaic Systems' + n + 3*t
+    s += ess2 + '\'' + n + 3*t
+    s += ess3 + '\'' + 'supply' + '\'' + n + 3*t
+    s += ess6 + '\'' + 'electricity' + '\'' + n + 2*t
+    s += 'constraints:' + n + 3*t
+    s += 'energy_cap_max: ' + 'inf' + n + 3*t
+    s += con9 + 'file=t_sam_input_' + str(year) + '.csv:spc|ERROR' + n + 3*t
+    s += con10 + 'inf'  + n + 3*t
+    s += con11 + 'false'  + n + 3*t
+    s += con12 + '1'  + n + 3*t
+    s += con3 + '25'  + n + 2*t
+    
+    s += 'costs:' + n + 3*t
+    s += 'monetary:' + n + 4*t
+    s += con4 + n + 4*t
+    s += 'om_annual_investment_fraction' + n + 4*t
+    s += 'depreciation_rate' + n + 1*t
+    
+    s += 'techs:' + n + 2*t
+    s += str(solar[0]) + '_large_scale:'  + n + 3*t
+    s += 'essentials: ' + n + 4*t
+    s += ess3 + str(solar[0]) + n + 4*t
+    s += ess1 + '\''
+    #ojo!! colocar '\'' a todos los nombres en offshore y parent
+    
+    
+    with open('pystel\\outputs\\techgroupstest.yaml', 'w') as f:
+        f.write(s)
+
+    print('Wrote data to pystel\\outputs\\techgroups.yaml')
+            
+            
+            
+  
