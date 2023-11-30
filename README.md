@@ -1,3 +1,3 @@
 # Test_AB_01
-My first repo
-Linnear optimization tutotrial
+My first repo 
+Prospective databases and other things
